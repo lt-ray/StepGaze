@@ -31,6 +31,11 @@ public class GazeButton : MonoBehaviour
     [Header("決定エリア方式設定")]
     public float dwellToShowAreas = 0.3f;        // ボタン上で何秒見たら決定エリアを出すか
     public RectTransform decisionAreaPrefab;     // 決定エリアのプレハブ
+    [Header("決定エリアの dwell 秒数（秒）")]
+    public float area1Dwell = 0.2f;
+    public float area2Dwell = 0.2f;
+    public float area3Dwell = 0.2f;
+
 
     [Header("決定エリアの配置オフセット（ボタン中心からの相対座標）")]
     [SerializeField] private Vector2 oneAreaOffset1    = new Vector2(80f, 0f);
@@ -201,8 +206,14 @@ public class GazeButton : MonoBehaviour
         script.index = index;
         script.owner = this;
 
+        // ★ エリアごとの dwell 秒数を渡す
+        if (index == 1)      script.dwellDuration = area1Dwell;
+        else if (index == 2) script.dwellDuration = area2Dwell;
+        else if (index == 3) script.dwellDuration = area3Dwell;
+
         spawnedAreas.Add(script);
     }
+
 
     // ★ 決定エリアが通過されたとき（エリア自身から呼ばれる）
     public void OnAreaPassed(int index, GazeDecisionArea area)
