@@ -5,11 +5,18 @@ public class GazeDecisionArea : MonoBehaviour
 {
     public int index;               // 1, 2, 3...
     public GazeButton owner;        // 親ボタン
-    public float dwellDuration = 0.2f;  // このエリアに必要な dwell 秒数（GazeButton から設定される）
+    public float dwellDuration = 0.2f;
 
     private bool wasGazedLastFrame = false;
-    private bool passedInThisStay = false;  // 今の「滞在」の間に一度通過判定したか
+    private bool passedInThisStay = false;
     private float gazeTimer = 0f;
+
+    private Image img;
+
+    private void Awake()
+    {
+        img = GetComponent<Image>();
+    }
 
     private void Update()
     {
@@ -20,7 +27,6 @@ public class GazeDecisionArea : MonoBehaviour
 
         if (nowGazed)
         {
-            // 新しく乗った瞬間にタイマーリセット
             if (!wasGazedLastFrame)
             {
                 gazeTimer = 0f;
@@ -29,7 +35,6 @@ public class GazeDecisionArea : MonoBehaviour
 
             gazeTimer += Time.deltaTime;
 
-            // まだこの滞在中に通過報告していなくて、dwell時間を超えたら通過
             if (!passedInThisStay && gazeTimer >= dwellDuration)
             {
                 passedInThisStay = true;
@@ -38,7 +43,6 @@ public class GazeDecisionArea : MonoBehaviour
         }
         else
         {
-            // 視線が外れたらタイマーもフラグもリセット
             gazeTimer = 0f;
             passedInThisStay = false;
         }
@@ -46,7 +50,6 @@ public class GazeDecisionArea : MonoBehaviour
         wasGazedLastFrame = nowGazed;
     }
 
-    // 見た目だけ消したい（Update は動かしたまま）とき用
     public void SetVisible(bool visible)
     {
         var graphics = GetComponentsInChildren<Graphic>();
@@ -54,5 +57,12 @@ public class GazeDecisionArea : MonoBehaviour
         {
             g.enabled = visible;
         }
+    }
+
+    public void SetColor(Color c)
+    {
+        if (img == null) img = GetComponent<Image>();
+        if (img != null)
+            img.color = c;
     }
 }

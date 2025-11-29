@@ -7,16 +7,15 @@ public class GazeButton : MonoBehaviour
 {
     public enum SelectionMode
     {
-        DwellOnly,         // dwell だけで確定
-        SequentialAreas    // 提案方式：決定エリアを順番に通過
+        DwellOnly,
+        SequentialAreas
     }
 
-    // 決定エリアの個数
     public enum DecisionAreaCount
     {
-        One = 1,   // 決定エリア1個
-        Two = 2,   // 決定エリア2個
-        Three = 3  // 決定エリア3個
+        One = 1,
+        Two = 2,
+        Three = 3
     }
 
     [Header("モード")]
@@ -26,52 +25,61 @@ public class GazeButton : MonoBehaviour
     public DecisionAreaCount decisionAreaCount = DecisionAreaCount.Two;
 
     [Header("Dwell 設定")]
-    public float dwellToConfirm = 0.7f;          // dwell方式: 何秒見たら確定？
+    public float dwellToConfirm = 0.7f;  // DwellOnly用
+
+    [Header("Dwell プログレスリング")]
+    public Image dwellRingImage;
 
     [Header("決定エリア方式設定")]
-    public float dwellToShowAreas = 0.3f;        // ボタン上で何秒見たら決定エリアを出すか
+    public float dwellToShowAreas = 0.3f;        // ボタン上で決定エリアを出すまでのdwell
     public RectTransform decisionAreaPrefab;     // 決定エリアのプレハブ
+
     [Header("決定エリアの dwell 秒数（秒）")]
     public float area1Dwell = 0.2f;
     public float area2Dwell = 0.2f;
     public float area3Dwell = 0.2f;
 
-
     [Header("決定エリアの配置オフセット（ボタン中心からの相対座標）")]
-    [SerializeField] private Vector2 oneAreaOffset1    = new Vector2(80f, 0f);
-
-    [SerializeField] private Vector2 twoAreaOffset1    = new Vector2(-80f, 0f);
-    [SerializeField] private Vector2 twoAreaOffset2    = new Vector2( 80f, 0f);
-
-    [SerializeField] private Vector2 threeAreaOffset1  = new Vector2(  0f,  80f);
-    [SerializeField] private Vector2 threeAreaOffset2  = new Vector2(-80f, -40f);
-    [SerializeField] private Vector2 threeAreaOffset3  = new Vector2( 80f, -40f);
+    [SerializeField] private Vector2 oneAreaOffset1   = new Vector2(80f, 0f);
+    [SerializeField] private Vector2 twoAreaOffset1   = new Vector2(-80f, 0f);
+    [SerializeField] private Vector2 twoAreaOffset2   = new Vector2( 80f, 0f);
+    [SerializeField] private Vector2 threeAreaOffset1 = new Vector2(  0f,  80f);
+    [SerializeField] private Vector2 threeAreaOffset2 = new Vector2(-80f, -40f);
+    [SerializeField] private Vector2 threeAreaOffset3 = new Vector2( 80f, -40f);
 
     [Header("決定エリアの色")]
     public Color area1Color = Color.red;
     public Color area2Color = Color.green;
     public Color area3Color = Color.blue;
 
+    [Header("次に見るべき決定エリアのハイライト色")]
+    public Color nextAreaColor = Color.yellow;
+
     private RectTransform rect;
     private float gazeTimer = 0f;
 
     // 提案方式用
     private bool areasSpawned = false;
-    private int nextExpectedIndex = 1;               // 次に期待するエリア番号
+    private int nextExpectedIndex = 1;
     private List<GazeDecisionArea> spawnedAreas = new List<GazeDecisionArea>();
 
-    private bool dwellLocked = false;  // Dwell方式：確定後、離脱までロック
+    private bool dwellLocked = false;  // DwellOnly: 確定後、離脱までロック
 
     [Header("デバッグ用表示")]
     public TextMeshProUGUI countText;
     static private int confirmCount = 0;
 
-    // ★ 今どのボタンが“決定エリアを出しているか”
+    // 今どのボタンが「決定エリアを出しているか」
     private static GazeButton activeSequentialButton = null;
 
     [Header("テンキー用設定")]
-    public bool isNumberKey = false;  // このボタンが数字キーかどうか
-    public int keyValue = 0;          // 数字キーの場合の値（0〜9）
+    public bool isNumberKey = false;
+    public int keyValue = 0;
+
+    // ★ フェーズ計測用
+    private float buttonGazeStartTime = -1f;  // Button に視線が乗った時刻 T0
+    private float lastPhaseTime       = -1f;  // 直前フェーズ終了時刻
+    private bool wasGazedThisButtonLastFrame = false;
 
     private void Awake()
     {
@@ -88,23 +96,20 @@ public class GazeButton : MonoBehaviour
 
         if (gazed != null)
         {
-            // ① まず決定エリアかどうかを見る
             var area = gazed.GetComponent<GazeDecisionArea>();
             if (area != null && area.owner != null)
             {
-                // 決定エリアなら、その owner ボタンを「見ているボタン」とする
                 gazedButton = area.owner;
             }
             else
             {
-                // ② それ以外（普通のUI）は従来通り GazeButton を親から探す
                 gazedButton = gazed.GetComponentInParent<GazeButton>();
             }
         }
 
         bool onThisButton = (gazedButton == this);
 
-        // ★ 他のボタンが見られたら、自分の決定エリアは消す（ミス扱いで初期化）
+        // 他ボタンが見られたら、自分の決定エリアはリセット
         if (selectionMode == SelectionMode.SequentialAreas &&
             activeSequentialButton != null &&
             gazedButton != null &&
@@ -113,41 +118,65 @@ public class GazeButton : MonoBehaviour
             activeSequentialButton.ResetState();
         }
 
+        // ★ 提案方式で「このボタンに乗った瞬間」を検出
+        if (selectionMode == SelectionMode.SequentialAreas &&
+            onThisButton && !wasGazedThisButtonLastFrame)
+        {
+            buttonGazeStartTime = Time.time;
+            lastPhaseTime       = buttonGazeStartTime;
+
+            Debug.Log($"[Seq] Button gaze start at {buttonGazeStartTime:F3} on {gameObject.name}");
+        }
+
         if (onThisButton)
         {
             gazeTimer += Time.deltaTime;
 
             if (selectionMode == SelectionMode.DwellOnly)
             {
-                // すでに確定済みなら、離脱するまで何もしない
-                if (dwellLocked) return;
+                if (dwellLocked)
+                {
+                    SetDwellProgress(0f);
+                    wasGazedThisButtonLastFrame = onThisButton;
+                    return;
+                }
 
-                // dwell方式：一定時間見たらそのまま確定
+                float ratio = gazeTimer / dwellToConfirm;
+                SetDwellProgress(ratio);
+
                 if (gazeTimer >= dwellToConfirm)
                 {
                     Debug.Log("DWELL方式で確定: " + gameObject.name);
                     OnConfirmed();
-                    dwellLocked = true; // 離脱するまでロック
+                    dwellLocked = true;
+                    SetDwellProgress(0f);
                 }
             }
             else if (selectionMode == SelectionMode.SequentialAreas)
             {
-                // 提案方式：一定時間見たら決定エリアを出す
+                if (!areasSpawned)
+                {
+                    float ratio = gazeTimer / dwellToShowAreas;
+                    SetDwellProgress(ratio);
+                }
+
                 if (!areasSpawned && gazeTimer >= dwellToShowAreas)
                 {
                     Debug.Log("DWELL完了 → 決定エリア生成: " + gameObject.name);
                     SpawnDecisionAreas();
                     areasSpawned = true;
-                    activeSequentialButton = this;   // ★ このボタンがアクティブ
+                    activeSequentialButton = this;
+                    SetDwellProgress(0f);
                 }
             }
         }
-        else  // 視線がこのボタン（およびその決定エリア）から外れた
+        else
         {
             gazeTimer = 0f;
             dwellLocked = false;
 
-            // ★ dwell の色リセットだけやる（Sequential は触らない）
+            SetDwellProgress(0f);
+
             if (selectionMode == SelectionMode.DwellOnly)
             {
                 var img = GetComponent<Image>();
@@ -156,6 +185,15 @@ public class GazeButton : MonoBehaviour
             }
         }
 
+        wasGazedThisButtonLastFrame = onThisButton;
+    }
+
+    private void SetDwellProgress(float t)
+    {
+        if (dwellRingImage == null) return;
+        t = Mathf.Clamp01(t);
+        dwellRingImage.enabled = (t > 0f);
+        dwellRingImage.fillAmount = t;
     }
 
     // ==========================
@@ -164,7 +202,7 @@ public class GazeButton : MonoBehaviour
 
     private int GetDecisionAreaCountValue()
     {
-        return (int)decisionAreaCount; // enum → 1/2/3 の数値
+        return (int)decisionAreaCount;
     }
 
     private void SpawnDecisionAreas()
@@ -184,6 +222,10 @@ public class GazeButton : MonoBehaviour
             CreateArea(threeAreaOffset2, 2);
             CreateArea(threeAreaOffset3, 3);
         }
+
+        // 最初に見るべきエリアをハイライト
+        nextExpectedIndex = 1;
+        HighlightNextArea();
     }
 
     private void CreateArea(Vector2 offset, int index)
@@ -191,13 +233,12 @@ public class GazeButton : MonoBehaviour
         RectTransform parent = rect.parent as RectTransform;
         RectTransform areaRect = Instantiate(decisionAreaPrefab, parent);
 
-        // ボタンの位置 + 個別オフセット
         areaRect.anchoredPosition = rect.anchoredPosition + offset;
 
         var img = areaRect.GetComponent<Image>();
         if (img != null)
         {
-            if (index == 1)      img.color = area1Color;
+            if      (index == 1) img.color = area1Color;
             else if (index == 2) img.color = area2Color;
             else if (index == 3) img.color = area3Color;
         }
@@ -206,78 +247,147 @@ public class GazeButton : MonoBehaviour
         script.index = index;
         script.owner = this;
 
-        // ★ エリアごとの dwell 秒数を渡す
-        if (index == 1)      script.dwellDuration = area1Dwell;
+        if      (index == 1) script.dwellDuration = area1Dwell;
         else if (index == 2) script.dwellDuration = area2Dwell;
         else if (index == 3) script.dwellDuration = area3Dwell;
 
         spawnedAreas.Add(script);
     }
 
-
-    // ★ 決定エリアが通過されたとき（エリア自身から呼ばれる）
+    // 決定エリア通過時に呼ばれる
     public void OnAreaPassed(int index, GazeDecisionArea area)
     {
         if (selectionMode != SelectionMode.SequentialAreas) return;
 
         int total = GetDecisionAreaCountValue();
+        float now = Time.time;
 
-        // 正しい順番のエリアが通過されたときだけ処理
         if (index == nextExpectedIndex)
         {
+            // ★ フェーズ時間の計測（Button→Area1, Area1→Area2,...）
+            if (lastPhaseTime > 0f)
+            {
+                float segment = now - lastPhaseTime;
+                string fromStage = (index == 1) ? "Button" : $"Area{index - 1}";
+                string toStage   = $"Area{index}";
+
+                Debug.Log($"[Seq] {fromStage} -> {toStage} : {segment:F3} sec (button {gameObject.name})");
+
+                // CSV ログ
+                if (ExperimentLogger.Instance != null && NumberTaskManager.Instance != null)
+                {
+                    var ntm = NumberTaskManager.Instance;
+                    ExperimentLogger.Instance.LogPhaseEvent(
+                        taskType: "Number",
+                        condition: GetConditionString(),
+                        trialIndex: ntm.CurrentTrialIndex,
+                        keyIndex:   ntm.CurrentInputLength,   // このキーが最終的に入る位置（まだ確定前）
+                        target:     ntm.CurrentTarget,
+                        currentInputAfter: ntm.CurrentInput,
+                        phaseFrom:  fromStage,
+                        phaseTo:    toStage,
+                        phaseDuration: segment,
+                        trialStartTime: ntm.CurrentTrialStartTime
+                    );
+                }
+            }
+
+            lastPhaseTime = now;
+
             Debug.Log($"決定エリア{index} 通過（正しい順番）");
 
-            // 見た目を消す（正しいエリアだけ）
             area.SetVisible(false);
 
             if (nextExpectedIndex == total)
             {
-                // 必要な数すべて通過 → 確定
+                // 全て通過 → 確定
                 OnConfirmed();
             }
             else
             {
-                // 次に期待するエリア番号を進める
                 nextExpectedIndex++;
+                HighlightNextArea();
             }
         }
         else
         {
-            // 順番違いは無視（見た目も消さない）
             Debug.Log($"決定エリア{index} 通過（順番違い / 期待: {nextExpectedIndex}）");
+        }
+    }
+
+    private void HighlightNextArea()
+    {
+        foreach (var area in spawnedAreas)
+        {
+            if (area == null) continue;
+            if (area.index == nextExpectedIndex)
+            {
+                area.SetColor(nextAreaColor);
+                Debug.Log($"次に見るべきエリア {nextExpectedIndex} をハイライト");
+                break;
+            }
         }
     }
 
     private void OnConfirmed()
     {
+        float now = Time.time;
+
+        // ★ 最後のフェーズ（AreaN -> Confirm）のログ
+        if (selectionMode == SelectionMode.SequentialAreas &&
+            lastPhaseTime > 0f &&
+            NumberTaskManager.Instance != null)
+        {
+            float segment = now - lastPhaseTime;
+            int total = GetDecisionAreaCountValue();
+            string fromStage = $"Area{total}";
+            string toStage   = "Confirm";
+
+            Debug.Log($"[Seq] {fromStage} -> {toStage} : {segment:F3} sec (button {gameObject.name})");
+
+            var ntm = NumberTaskManager.Instance;
+            if (ExperimentLogger.Instance != null)
+            {
+                ExperimentLogger.Instance.LogPhaseEvent(
+                    taskType: "Number",
+                    condition: GetConditionString(),
+                    trialIndex: ntm.CurrentTrialIndex,
+                    keyIndex:   ntm.CurrentInputLength, // Confirm前なのでまだこの桁
+                    target:     ntm.CurrentTarget,
+                    currentInputAfter: ntm.CurrentInput,
+                    phaseFrom:  fromStage,
+                    phaseTo:    toStage,
+                    phaseDuration: segment,
+                    trialStartTime: ntm.CurrentTrialStartTime
+                );
+            }
+        }
+
         Debug.Log("ボタン確定！！ " + gameObject.name);
 
-         // 数字キー → NumberTaskManager に数字を送る
         if (isNumberKey && NumberTaskManager.Instance != null)
         {
             NumberTaskManager.Instance.OnDigitConfirmed(keyValue);
         }
 
-        // カウント増加
         confirmCount++;
-
-        // 画面のUIを更新
         if (countText != null)
             countText.text = "Count: " + confirmCount;
 
-        // 見た目変化（研究用にわかりやすく）
         var img = GetComponent<Image>();
         if (img != null)
             img.color = Color.green;
 
-        // Sequential の時だけ決定エリア関連の状態をリセット
         if (selectionMode == SelectionMode.SequentialAreas)
             ResetState();
+
+        // フェーズ計測リセット
+        buttonGazeStartTime = -1f;
+        lastPhaseTime       = -1f;
     }
 
     private void ResetState()
     {
-        // 決定エリアの削除
         foreach (var area in spawnedAreas)
         {
             if (area != null && area.gameObject != null)
@@ -291,13 +401,16 @@ public class GazeButton : MonoBehaviour
 
         if (activeSequentialButton == this)
             activeSequentialButton = null;
-    
+
         var img = GetComponent<Image>();
         if (img != null)
-        {
             img.color = Color.white;
-        }
 
         Debug.Log("GazeButton を初期状態にリセット: " + gameObject.name);
+    }
+
+    private string GetConditionString()
+    {
+        return $"{selectionMode}_Areas{GetDecisionAreaCountValue()}";
     }
 }
