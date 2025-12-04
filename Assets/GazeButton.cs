@@ -10,7 +10,6 @@ public class GazeButton : MonoBehaviour
         DwellOnly,
         SequentialAreas
     }
-
     public enum DecisionAreaCount
     {
         One = 1,
@@ -80,11 +79,25 @@ public class GazeButton : MonoBehaviour
     private float buttonGazeStartTime = -1f;  // Button に視線が乗った時刻 T0
     private float lastPhaseTime       = -1f;  // 直前フェーズ終了時刻
     private bool wasGazedThisButtonLastFrame = false;
+    private TextMeshProUGUI buttonText;
 
     private void Awake()
     {
         rect = GetComponent<RectTransform>();
+        buttonText = GetComponentInChildren<TextMeshProUGUI>();  // ボタンの子オブジェクトにあるText
+        if (buttonText != null)
+        {
+            buttonText.text = keyValue.ToString();  // ボタンに表示する数字を設定
+            if(keyValue == 10)
+            {
+                buttonText.text = "a";
+            }else if (keyValue == 11)
+            {
+                buttonText.text = "b";
+            }
+        }
     }
+   
 
     private void Update()
     {
@@ -368,6 +381,9 @@ public class GazeButton : MonoBehaviour
         if (isNumberKey && NumberTaskManager.Instance != null)
         {
             NumberTaskManager.Instance.OnDigitConfirmed(keyValue);
+        }else if(isNumberKey && RandomizedNumberTaskManager.Instance != null)
+        {
+            RandomizedNumberTaskManager.Instance.OnDigitConfirmed(keyValue);
         }
 
         confirmCount++;
