@@ -1,3 +1,4 @@
+using System.Collections; // コルーチン用に必要
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -33,6 +34,12 @@ public class GazeButton : MonoBehaviour
     public float dwellToShowAreas = 0.3f;        // ボタン上で決定エリアを出すまでのdwell
     public RectTransform decisionAreaPrefab;     // 決定エリアのプレハブ
 
+    [Header("★ タイムアウト設定（StepGaze用）")]
+    public float autoResetTime = 3.0f; // この秒数以内に確定しないとリセット
+
+    [Header("★ 確定後の表示維持時間（秒）")]
+    public float confirmFeedbackDuration = 0.5f; // 確定色が消えるまでの時間
+
     [Header("決定エリアの dwell 秒数（秒）")]
     public float area1Dwell = 0.2f;
     public float area2Dwell = 0.2f;
@@ -61,8 +68,10 @@ public class GazeButton : MonoBehaviour
     private bool areasSpawned = false;
     private int nextExpectedIndex = 1;
     private List<GazeDecisionArea> spawnedAreas = new List<GazeDecisionArea>();
+    private float areaLifeTimer = 0f; // エリアが表示されてからの経過時間
 
     private bool dwellLocked = false;  // DwellOnly: 確定後、離脱までロック
+    private bool isFreezing = false;   // ★ 確定演出中などで入力を受け付けないフラグ
 
     [Header("デバッグ用表示")]
     public TextMeshProUGUI countText;
@@ -75,7 +84,10 @@ public class GazeButton : MonoBehaviour
     public bool isNumberKey = false;
     public int keyValue = 0;
 
-    // ★ フェーズ計測用
+    // ボタンの基本色（DotTaskManager等から変更可能にする）
+    [HideInInspector] public Color currentBaseColor = Color.white;
+
+    // フェーズ計測用
     private float buttonGazeStartTime = -1f;  // Button に視線が乗った時刻 T0
     private float lastPhaseTime       = -1f;  // 直前フェーズ終了時刻
     private bool wasGazedThisButtonLastFrame = false;
@@ -96,19 +108,29 @@ public class GazeButton : MonoBehaviour
                 buttonText.text = "b";
             }
         }
+        
+        // 初期色を保存
+        var img = GetComponent<Image>();
+        if(img != null) currentBaseColor = img.color;
     }
    
 
     private void Update()
     {
+        // ★ 確定演出中などは処理を止める
+        if (isFreezing) return;
+
         if (GazeManager.Instance == null) return;
 
+        // ---------------------------------------------------------
+        // 1. 先に視線判定を行う (タイムアウト判定で onThisButton を使うため位置を移動)
+        // ---------------------------------------------------------
         GameObject gazed = GazeManager.Instance.GetGazedUI();
-
         GazeButton gazedButton = null;
 
         if (gazed != null)
         {
+            // 決定エリアを見ている場合も、その親(Owner)を見ているとみなす
             var area = gazed.GetComponent<GazeDecisionArea>();
             if (area != null && area.owner != null)
             {
@@ -122,6 +144,39 @@ public class GazeButton : MonoBehaviour
 
         bool onThisButton = (gazedButton == this);
 
+
+        // ---------------------------------------------------------
+        // 2. タイムアウト監視（エリアが表示されている場合のみ）
+        // ---------------------------------------------------------
+        if (areasSpawned)
+        {
+            // ★ 修正箇所: ボタン（または決定エリア）を見ている間はタイマーを進めない
+            if (onThisButton)
+            {
+                // 視線が乗っている間はタイマーをリセット(0)し続ける
+                // ※「離してから3秒」にするため、見ている間は常に0にします
+                areaLifeTimer = 0f; 
+            }
+            else
+            {
+                // 視線が外れている時だけ時間を進める
+                areaLifeTimer += Time.deltaTime;
+            }
+
+            // 制限時間を超えたらリセット
+            if (areaLifeTimer >= autoResetTime)
+            {
+                Debug.Log($"[Seq] Time out reset: {gameObject.name}");
+                ResetState();
+                return; // リセットしたら以降の処理は不要
+            }
+        }
+
+
+        // ---------------------------------------------------------
+        // 3. 視線が乗っている時の処理 (Dwell / エリア生成)
+        // ---------------------------------------------------------
+        
         // 他ボタンが見られたら、自分の決定エリアはリセット
         if (selectionMode == SelectionMode.SequentialAreas &&
             activeSequentialButton != null &&
@@ -131,14 +186,15 @@ public class GazeButton : MonoBehaviour
             activeSequentialButton.ResetState();
         }
 
-        // ★ 提案方式で「このボタンに乗った瞬間」を検出
+        // 提案方式で「このボタンに乗った瞬間」を検出
         if (selectionMode == SelectionMode.SequentialAreas &&
             onThisButton && !wasGazedThisButtonLastFrame)
         {
             buttonGazeStartTime = Time.time;
             lastPhaseTime       = buttonGazeStartTime;
 
-            Debug.Log($"[Seq] Button gaze start at {buttonGazeStartTime:F3} on {gameObject.name}");
+            // ログがうるさければコメントアウトしてください
+            // Debug.Log($"[Seq] Button gaze start at {buttonGazeStartTime:F3} on {gameObject.name}");
         }
 
         if (onThisButton)
@@ -167,12 +223,14 @@ public class GazeButton : MonoBehaviour
             }
             else if (selectionMode == SelectionMode.SequentialAreas)
             {
+                // まだエリアが出ていない場合のみDwell計算
                 if (!areasSpawned)
                 {
                     float ratio = gazeTimer / dwellToShowAreas;
                     SetDwellProgress(ratio);
                 }
 
+                // 一定時間見つめてエリアを出す
                 if (!areasSpawned && gazeTimer >= dwellToShowAreas)
                 {
                     Debug.Log("DWELL完了 → 決定エリア生成: " + gameObject.name);
@@ -185,6 +243,7 @@ public class GazeButton : MonoBehaviour
         }
         else
         {
+            // 視線が外れたら gazeTimer (エリアを出すためのタイマー) はリセット
             gazeTimer = 0f;
             dwellLocked = false;
 
@@ -194,7 +253,7 @@ public class GazeButton : MonoBehaviour
             {
                 var img = GetComponent<Image>();
                 if (img != null)
-                    img.color = Color.white;
+                    img.color = currentBaseColor; // 基本色に戻す
             }
         }
 
@@ -220,6 +279,9 @@ public class GazeButton : MonoBehaviour
 
     private void SpawnDecisionAreas()
     {
+        // タイマーリセット
+        areaLifeTimer = 0f;
+
         if (decisionAreaCount == DecisionAreaCount.One)
         {
             CreateArea(oneAreaOffset1, 1);
@@ -268,16 +330,21 @@ public class GazeButton : MonoBehaviour
     }
 
     // 決定エリア通過時に呼ばれる
+    // 決定エリア通過時に呼ばれる
     public void OnAreaPassed(int index, GazeDecisionArea area)
     {
+        // 確定演出中などは無視
+        if (isFreezing) return;
+
         if (selectionMode != SelectionMode.SequentialAreas) return;
 
         int total = GetDecisionAreaCountValue();
         float now = Time.time;
 
+        // ★ 修正箇所: 正しい順番のエリアか判定
         if (index == nextExpectedIndex)
         {
-            // ★ フェーズ時間の計測（Button→Area1, Area1→Area2,...）
+            // フェーズ時間の計測
             if (lastPhaseTime > 0f)
             {
                 float segment = now - lastPhaseTime;
@@ -286,7 +353,6 @@ public class GazeButton : MonoBehaviour
 
                 Debug.Log($"[Seq] {fromStage} -> {toStage} : {segment:F3} sec (button {gameObject.name})");
 
-                // CSV ログ
                 if (ExperimentLogger.Instance != null && NumberTaskManager.Instance != null)
                 {
                     var ntm = NumberTaskManager.Instance;
@@ -294,7 +360,7 @@ public class GazeButton : MonoBehaviour
                         taskType: "Number",
                         condition: GetConditionString(),
                         trialIndex: ntm.CurrentTrialIndex,
-                        keyIndex:   ntm.CurrentInputLength,   // このキーが最終的に入る位置（まだ確定前）
+                        keyIndex:   ntm.CurrentInputLength,
                         target:     ntm.CurrentTarget,
                         currentInputAfter: ntm.CurrentInput,
                         phaseFrom:  fromStage,
@@ -324,7 +390,10 @@ public class GazeButton : MonoBehaviour
         }
         else
         {
-            Debug.Log($"決定エリア{index} 通過（順番違い / 期待: {nextExpectedIndex}）");
+            // ★ リセット処理を追加
+            // 期待していないエリア（順番飛ばしや戻り）を見てしまったのでリセット
+            Debug.Log($"決定エリア{index} 通過（順番違い / 期待: {nextExpectedIndex}） -> リセットします");
+            ResetState();
         }
     }
 
@@ -346,7 +415,7 @@ public class GazeButton : MonoBehaviour
     {
         float now = Time.time;
 
-        // ★ 最後のフェーズ（AreaN -> Confirm）のログ
+        // ログ処理
         if (selectionMode == SelectionMode.SequentialAreas &&
             lastPhaseTime > 0f &&
             NumberTaskManager.Instance != null)
@@ -356,8 +425,6 @@ public class GazeButton : MonoBehaviour
             string fromStage = $"Area{total}";
             string toStage   = "Confirm";
 
-            Debug.Log($"[Seq] {fromStage} -> {toStage} : {segment:F3} sec (button {gameObject.name})");
-
             var ntm = NumberTaskManager.Instance;
             if (ExperimentLogger.Instance != null)
             {
@@ -365,7 +432,7 @@ public class GazeButton : MonoBehaviour
                     taskType: "Number",
                     condition: GetConditionString(),
                     trialIndex: ntm.CurrentTrialIndex,
-                    keyIndex:   ntm.CurrentInputLength, // Confirm前なのでまだこの桁
+                    keyIndex:   ntm.CurrentInputLength,
                     target:     ntm.CurrentTarget,
                     currentInputAfter: ntm.CurrentInput,
                     phaseFrom:  fromStage,
@@ -378,28 +445,57 @@ public class GazeButton : MonoBehaviour
 
         Debug.Log("ボタン確定！！ " + gameObject.name);
 
-        if (isNumberKey && NumberTaskManager.Instance != null)
+        // マネージャーへ通知
+        if (isNumberKey)
         {
-            NumberTaskManager.Instance.OnDigitConfirmed(keyValue);
-        }else if(isNumberKey && RandomizedNumberTaskManager.Instance != null)
-        {
-            RandomizedNumberTaskManager.Instance.OnDigitConfirmed(keyValue);
+            if (DotTaskManager.Instance != null)
+            {
+                DotTaskManager.Instance.OnDigitConfirmed(keyValue);
+            }
+            else if (RandomizedNumberTaskManager.Instance != null)
+            {
+                RandomizedNumberTaskManager.Instance.OnDigitConfirmed(keyValue);
+            }
+            else if (NumberTaskManager.Instance != null)
+            {
+                NumberTaskManager.Instance.OnDigitConfirmed(keyValue);
+            }
         }
 
         confirmCount++;
         if (countText != null)
             countText.text = "Count: " + confirmCount;
 
+        // ★ 色を変更（緑色など）
         var img = GetComponent<Image>();
         if (img != null)
             img.color = Color.green;
 
+        // StepGazeの場合：少し待ってからリセットするコルーチンを開始
         if (selectionMode == SelectionMode.SequentialAreas)
-            ResetState();
+        {
+            StartCoroutine(WaitAndResetRoutine());
+        }
 
         // フェーズ計測リセット
         buttonGazeStartTime = -1f;
         lastPhaseTime       = -1f;
+    }
+
+    // ★ 待機してからリセットするコルーチン
+    private IEnumerator WaitAndResetRoutine()
+    {
+        // ガードを有効化（この間は視線入力を受け付けない）
+        isFreezing = true;
+
+        // 指定秒数待機
+        yield return new WaitForSeconds(confirmFeedbackDuration);
+
+        // リセット実行
+        ResetState();
+
+        // ガード解除
+        isFreezing = false;
     }
 
     private void ResetState()
@@ -414,13 +510,14 @@ public class GazeButton : MonoBehaviour
         areasSpawned      = false;
         nextExpectedIndex = 1;
         gazeTimer         = 0f;
+        areaLifeTimer     = 0f;
 
         if (activeSequentialButton == this)
             activeSequentialButton = null;
 
         var img = GetComponent<Image>();
         if (img != null)
-            img.color = Color.white;
+            img.color = currentBaseColor; // 基本色に戻す
 
         Debug.Log("GazeButton を初期状態にリセット: " + gameObject.name);
     }

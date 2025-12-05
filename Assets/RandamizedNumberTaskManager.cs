@@ -11,20 +11,20 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     public TextMeshProUGUI inputText;
 
     [Header("タスク設定")]
+    // 数字だけでなく a, b も含められます (例: "53a", "b12")
     [SerializeField] private string[] targets = { "5372", "149", "80" };
     private int currentTrialIndex = 0;
 
     [Header("キー値の配置シーケンス")]
-    // 0-9 と 10(a), 11(b) の12個のキーを想定した例。
-    // Unity Inspectorから値を設定してください。
+    // 0-9 と 10(a), 11(b) の12個のキーを想定
     [SerializeField]
     private List<int[]> keyLayoutSequences = new List<int[]>()
     {
-        // パターン 1: (1, 4, 2, 3, 5, 6, 9, 7, 8, a, b, 0) の順でボタンに割り当てる
+        // パターン 1
         new int[] { 1, 4, 2, 3, 5, 6, 9, 7, 8, 10, 11, 0 }, 
-        // パターン 2: (0, 9, 8, 7, 6, 5, 4, 3, 2, 1, b, a) の順でボタンに割り当てる
+        // パターン 2
         new int[] { 0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 11, 10 }, 
-        // パターン 3: (a, b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9) の順でボタンに割り当てる
+        // パターン 3
         new int[] { 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }  
     };
 
@@ -36,8 +36,6 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     private float trialStartTime = 0f;
 
     private int totalErrorCount = 0;  // 累計誤選択数
-
-    // private int[] randomizedKeyValues;  // 削除: ランダム配列は不要
 
     // 他スクリプトから参照する用プロパティ
     public int CurrentTrialIndex => currentTrialIndex;
@@ -55,7 +53,6 @@ public class RandomizedNumberTaskManager : MonoBehaviour
 
     private void Start()
     {
-        // 初期化処理削除（キー配列の初期化は不要になったため）
         StartTrial();
     }
 
@@ -84,8 +81,7 @@ public class RandomizedNumberTaskManager : MonoBehaviour
             return;
         }
 
-        // 現在のインデックスに基づいて配置パターンを取得（リストの最後まできたら最初に戻る）
-        // 例: currentLayoutIndex=0ならkeyLayoutSequences[0]を使用
+        // 現在のインデックスに基づいて配置パターンを取得
         int[] currentLayout = keyLayoutSequences[currentLayoutIndex % keyLayoutSequences.Count];
 
         // すべての GazeButton を取得
@@ -94,50 +90,55 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         // ボタンにシーケンスの値をセットし、テキストを更新
         for (int i = 0; i < buttons.Length && i < currentLayout.Length; i++)
         {
-            // keyValueを更新
             buttons[i].keyValue = currentLayout[i];
             
             // ボタン上のテキストを更新
             var buttonText = buttons[i].GetComponentInChildren<TextMeshProUGUI>();
             if (buttonText != null)
             {
-                if (buttons[i].keyValue == 10)
-                {
-                    buttonText.text = "a";
-                }
-                else if (buttons[i].keyValue == 11)
-                {
-                    buttonText.text = "b";
-                }
-                else
-                {
-                    buttonText.text = buttons[i].keyValue.ToString();
-                }
+                if (buttons[i].keyValue == 10) buttonText.text = "a";
+                else if (buttons[i].keyValue == 11) buttonText.text = "b";
+                else buttonText.text = buttons[i].keyValue.ToString();
             }
         }
     }
 
-    // 古いランダム化関連メソッドは削除しました
+    /// <summary>
+    /// 文字('0'-'9', 'a', 'b') を KeyValue (0-11) に変換するヘルパー
+    /// </summary>
+    private int CharToKeyValue(char c)
+    {
+        if (char.IsDigit(c)) return int.Parse(c.ToString());
+        else if (c == 'a' || c == 'A') return 10;
+        else if (c == 'b' || c == 'B') return 11;
+        return -1;
+    }
+
+    /// <summary>
+    /// KeyValue (0-11) を表示用文字に変換するヘルパー
+    /// </summary>
+    private string KeyValueToString(int val)
+    {
+        if (val >= 0 && val <= 9) return val.ToString();
+        if (val == 10) return "a";
+        if (val == 11) return "b";
+        return "?";
+    }
 
     private string GetCurrentConditionString()
     {
-        // 今の状態を返す（GazeButtonのフィールドを使用）
         var btn = FindObjectOfType<GazeButton>();
         if (btn == null) return "Unknown";
         return $"{btn.selectionMode}_Areas{(int)btn.decisionAreaCount}";
     }
 
-    /// <summary>
-    /// GazeButton から数字キーが確定されたときに呼ぶ
-    /// </summary>
     public void OnDigitConfirmed(int digit)
     {
         // すでにターゲット長に達している → 余分な入力として誤りカウントだけ
         if (currentInput.Length >= currentTarget.Length)
         {
             totalErrorCount++;
-
-            if (ExperimentLogger.Instance != null) // ExperimentLogger.csがあるためログを有効化
+            if (ExperimentLogger.Instance != null)
             {
                 ExperimentLogger.Instance.LogKeyEvent(
                     taskType: "Number",
@@ -153,20 +154,23 @@ public class RandomizedNumberTaskManager : MonoBehaviour
                     totalErrorCount: totalErrorCount
                 );
             }
-
             return;
         }
 
-        int pos = currentInput.Length;               // 今の桁位置
-        int expectedDigit = currentTarget[pos] - '0';
+        int pos = currentInput.Length;
+        
+        // ★ 修正点: ターゲット文字を数値に変換して比較
+        char targetChar = currentTarget[pos];
+        int expectedDigit = CharToKeyValue(targetChar);
+
         bool correct = (digit == expectedDigit);
 
-        string after = correct
-            ? currentInput + digit.ToString()
-            : currentInput;
+        // ★ 修正点: 表示用文字列も対応関数を使用
+        string digitStr = KeyValueToString(digit);
+        string after = correct ? currentInput + digitStr : currentInput;
 
         // ログ出力
-        if (ExperimentLogger.Instance != null) // ExperimentLogger.csがあるためログを有効化
+        if (ExperimentLogger.Instance != null)
         {
             ExperimentLogger.Instance.LogKeyEvent(
                 taskType: "Number",
@@ -195,10 +199,9 @@ public class RandomizedNumberTaskManager : MonoBehaviour
                 float rt = Time.time - trialStartTime;
                 Debug.Log($"[RandomizedNumberTask] Trial {currentTrialIndex} COMPLETED. RT = {rt:F3}, Errors = {totalErrorCount}");
 
-                // 次のトライアルへ
                 currentTrialIndex = (currentTrialIndex + 1) % targets.Length;
                 
-                // 次のレイアウトパターンへインデックスを更新
+                // 次のレイアウトパターンへ
                 currentLayoutIndex++;
                 
                 StartTrial();
