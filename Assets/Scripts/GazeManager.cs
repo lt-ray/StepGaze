@@ -29,7 +29,7 @@ public class GazeManager : MonoBehaviour
 
     private void Update()
     {
-        // ★ 今はマウス位置＝視線
+        // ★アイトラッカーの場合はここをSDKの座標取得に変更
         GazeScreenPosition = Input.mousePosition;
     }
 

@@ -1,7 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI; 
 using TMPro;
-using System.Collections; 
+using System.Collections.Generic;
+using System.Collections;
 
 public class DotTaskManager : MonoBehaviour
 {
@@ -15,8 +16,26 @@ public class DotTaskManager : MonoBehaviour
     public Image errorOverlay;
     public float screenFlashDuration = 0.2f;
 
-    [Header("タスク設定")]
-    [SerializeField] private string[] targets = { "5372", "149", "80ab" }; 
+    [Header("実験設定")]
+    [Range(0, 4)] public int scenarioID = 0; 
+
+    [System.Serializable]
+    public class ScenarioData
+    {
+        public string[] targets;
+    }
+
+    [Header("シナリオデータ (Inspectorで編集可能)")]
+    public List<ScenarioData> scenarios = new List<ScenarioData>()
+    {
+        new ScenarioData { targets = new string[] { "0", "b", "0", "9", "2", "8", "7", "4", "3", "4", "1", "b", "6", "9", "3", "5", "6", "1", "7", "5", "2", "a", "8", "a" } },
+        new ScenarioData { targets = new string[] { "a", "1", "a", "2", "4", "7", "6", "5", "8", "2", "0", "7", "1", "9", "0", "b", "4", "6", "8", "3", "b", "5", "3", "9" } },
+        new ScenarioData { targets = new string[] { "1", "5", "0", "6", "5", "2", "8", "6", "4", "3", "9", "a", "7", "2", "9", "7", "8", "3", "4", "b", "1", "a", "0", "b" } },
+        new ScenarioData { targets = new string[] { "b", "4", "6", "2", "8", "3", "5", "1", "a", "1", "9", "7", "0", "a", "4", "6", "8", "7", "2", "5", "b", "0", "9", "3" } },
+        new ScenarioData { targets = new string[] { "6", "9", "5", "9", "1", "7", "4", "5", "2", "8", "3", "a", "2", "0", "b", "8", "3", "0", "7", "4", "b", "1", "a", "6" } }
+    };
+
+    private List<string> currentTargetList = new List<string>();
     private int currentTrialIndex = 0;
 
     [Header("色の設定")]
@@ -42,25 +61,54 @@ public class DotTaskManager : MonoBehaviour
     private void Start()
     {
         if (errorOverlay != null) errorOverlay.gameObject.SetActive(false);
+        LoadScenario();
         StartTrial();
+    }
+
+    private void Update()
+    {
+        if (currentTrialIndex >= currentTargetList.Count) return;
+        if (ExperimentLogger.Instance == null || GazeManager.Instance == null) return;
+
+        ExperimentLogger.Instance.LogStreamData(
+            GazeManager.Instance.GazeScreenPosition,
+            currentTarget,
+            "DotTask_Running",
+            true
+        );
+    }
+
+    private void LoadScenario()
+    {
+        currentTargetList.Clear();
+        int id = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
+        if (scenarios[id].targets != null)
+        {
+            currentTargetList.AddRange(scenarios[id].targets);
+        }
+        Debug.Log($"[DotTask] Loaded Scenario {id}: {currentTargetList.Count} targets.");
     }
 
     private void StartTrial()
     {
-        if (currentTrialIndex >= targets.Length)
+        if (currentTrialIndex >= currentTargetList.Count)
         {
             Debug.Log("All DotTask Trials Completed.");
             if (targetText != null) targetText.text = "Finish";
             return;
         }
 
-        currentTarget = targets[currentTrialIndex];
+        currentTarget = currentTargetList[currentTrialIndex];
         currentInput = "";
 
         if (targetText != null) targetText.text = currentTarget;
         if (inputText != null) inputText.text = "";
 
         trialStartTime = Time.time;
+
+        var allButtons = FindObjectsOfType<GazeButton>();
+        foreach (var btn in allButtons) btn.ResetGazeTime();
+
         HighlightNextKey();
         Debug.Log($"[DotTask] Trial {currentTrialIndex} start. Target = {currentTarget}");
     }
@@ -112,42 +160,39 @@ public class DotTaskManager : MonoBehaviour
     {
         var btn = FindObjectOfType<GazeButton>();
         if (btn == null) return "Unknown";
-        return $"{btn.selectionMode}_Areas{(int)btn.decisionAreaCount}_DotTask";
+        return btn.GetConditionString();
     }
 
-    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount)
+    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount, Vector2 targetPos, Vector2 hitPos)
     {
-        if (currentTrialIndex >= targets.Length || currentInput.Length >= currentTarget.Length)
-        {
-            return false;
-        }
+        if (currentTrialIndex >= currentTargetList.Count) return false;
 
         int pos = currentInput.Length;
+        if (pos >= currentTarget.Length) return false;
+
         char targetChar = currentTarget[pos];
         int expectedDigit = CharToKeyValue(targetChar);
 
         bool correct = (digit == expectedDigit);
         string digitStr = KeyValueToString(digit);
         
-        string after = currentInput + digitStr;
-
         if (ExperimentLogger.Instance != null)
         {
-            ExperimentLogger.Instance.LogKeyEvent(
-                taskType: "DotTask",
+            string errorType = correct ? "" : "SelectionError";
+
+            ExperimentLogger.Instance.LogTrialResult(
                 condition: GetCurrentConditionString(),
-                trialIndex: currentTrialIndex,
-                keyIndex: pos,
-                target: currentTarget,
-                expected: expectedDigit.ToString(), 
-                inputDigit: digit.ToString(),      
-                isCorrect: correct,
-                currentInputAfter: after,
-                trialStartTime: trialStartTime,
-                totalErrorCount: correct ? totalErrorCount : totalErrorCount + 1,
-                searchTime: searchTime,       
-                selectionTime: selectionTime, 
-                resetCount: resetCount        
+                taskType: "DotTask",
+                trialNumber: currentTrialIndex,
+                targetId: expectedDigit.ToString(),
+                selectedId: digit.ToString(),
+                isSuccess: correct,
+                selectionTime: selectionTime,
+                searchTime: searchTime,
+                targetPosScreen: targetPos,
+                hitPosScreen: hitPos,
+                resetCount: resetCount,
+                errorType: errorType
             );
         }
 
@@ -160,9 +205,6 @@ public class DotTaskManager : MonoBehaviour
 
             if (currentInput.Length == currentTarget.Length)
             {
-                float rt = Time.time - trialStartTime;
-                Debug.Log($"[DotTask] Trial {currentTrialIndex} COMPLETED. RT = {rt:F3}");
-
                 currentTrialIndex++;
                 StartTrial();
             }
@@ -171,12 +213,8 @@ public class DotTaskManager : MonoBehaviour
         else
         {
             HandleError(); 
-            Debug.Log($"[DotTask] WRONG digit {digit} (expected {expectedDigit}) -> Abort Trial & Next");
-
-            // ★ エラー時は即座に次のトライアルへ
             currentTrialIndex++;
             StartTrial();
-
             return false; 
         }
     }

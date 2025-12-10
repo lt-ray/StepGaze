@@ -3,8 +3,8 @@ using UnityEngine.UI;
 
 public class GazeDecisionArea : MonoBehaviour
 {
-    public int index;               // 1, 2, 3...
-    public GazeButton owner;        // 親ボタン
+    public int index;               
+    public GazeButton owner;        
     public float dwellDuration = 0.2f;
 
     private bool wasGazedLastFrame = false;
@@ -53,16 +53,12 @@ public class GazeDecisionArea : MonoBehaviour
     public void SetVisible(bool visible)
     {
         var graphics = GetComponentsInChildren<Graphic>();
-        foreach (var g in graphics)
-        {
-            g.enabled = visible;
-        }
+        foreach (var g in graphics) g.enabled = visible;
     }
 
     public void SetColor(Color c)
     {
         if (img == null) img = GetComponent<Image>();
-        if (img != null)
-            img.color = c;
+        if (img != null) img.color = c;
     }
 }

@@ -12,9 +12,7 @@ public class NumberTaskManager : MonoBehaviour
     public TextMeshProUGUI inputText;
 
     [Header("エラー演出")]
-    [Tooltip("エラー時に一瞬表示する画面全体の赤いパネル（Image）")]
     public Image errorOverlay;
-    [Tooltip("画面全体が赤くなる時間（秒）")]
     public float screenFlashDuration = 0.2f;
 
     [Header("タスク設定")]
@@ -25,10 +23,8 @@ public class NumberTaskManager : MonoBehaviour
     private string currentInput = "";
 
     private float trialStartTime = 0f;
+    private int totalErrorCount = 0;
 
-    private int totalErrorCount = 0;  // 累計誤選択数
-
-    // 他スクリプトから参照する用プロパティ
     public int CurrentTrialIndex => currentTrialIndex;
     public int CurrentInputLength => currentInput.Length;
     public string CurrentTarget => currentTarget;
@@ -48,9 +44,22 @@ public class NumberTaskManager : MonoBehaviour
         StartTrial();
     }
 
+    // ★ ストリームログ
+    private void Update()
+    {
+        if (currentTrialIndex >= targets.Length) return;
+        if (ExperimentLogger.Instance == null || GazeManager.Instance == null) return;
+
+        ExperimentLogger.Instance.LogStreamData(
+            GazeManager.Instance.GazeScreenPosition,
+            currentTarget,
+            "NumberTask_Running",
+            true
+        );
+    }
+
     private void StartTrial()
     {
-        // 全課題終了チェック
         if (currentTrialIndex >= targets.Length)
         {
             Debug.Log("All NumberTask Trials Completed.");
@@ -66,6 +75,13 @@ public class NumberTaskManager : MonoBehaviour
 
         trialStartTime = Time.time;
 
+        // ★ GazeTimeリセット
+        var allButtons = FindObjectsOfType<GazeButton>();
+        foreach (var btn in allButtons)
+        {
+            btn.ResetGazeTime();
+        }
+
         Debug.Log($"[NumberTask] Trial {currentTrialIndex} start. Target = {currentTarget}");
     }
 
@@ -73,19 +89,13 @@ public class NumberTaskManager : MonoBehaviour
     {
         var btn = FindObjectOfType<GazeButton>();
         if (btn == null) return "Unknown";
-        return $"{btn.selectionMode}_Areas{(int)btn.decisionAreaCount}";
+        return btn.GetConditionString();
     }
 
-    /// <summary>
-    /// GazeButton から数字キーが確定されたときに呼ぶ
-    /// 引数を4つ受け取るように変更されています
-    /// </summary>
-    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount)
+    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount, Vector2 targetPos, Vector2 hitPos)
     {
-        // 終了チェック
         if (currentTrialIndex >= targets.Length) return false;
 
-        // 入力桁あふれチェック
         if (currentInput.Length >= currentTarget.Length)
         {
             HandleError();
@@ -93,64 +103,54 @@ public class NumberTaskManager : MonoBehaviour
         }
 
         int pos = currentInput.Length;               
-        int expectedDigit = currentTarget[pos] - '0'; // char -> int 変換 ('5' -> 5)
+        int expectedDigit = currentTarget[pos] - '0';
         
         bool correct = (digit == expectedDigit);
 
-        // 文字列表現
         string digitStr = digit.ToString();
         if (digit == 10) digitStr = "a";
         if (digit == 11) digitStr = "b";
 
         string after = currentInput + digitStr;
 
-        // ログ出力
+        // ★ ログ出力
         if (ExperimentLogger.Instance != null)
         {
-            ExperimentLogger.Instance.LogKeyEvent(
-                taskType: "Number",
+            string errorType = correct ? "" : "SelectionError";
+
+            ExperimentLogger.Instance.LogTrialResult(
                 condition: GetCurrentConditionString(),
-                trialIndex: currentTrialIndex,
-                keyIndex: pos,
-                target: currentTarget,
-                expected: expectedDigit.ToString(),
-                inputDigit: digitStr,
-                isCorrect: correct,
-                currentInputAfter: after,
-                trialStartTime: trialStartTime,
-                totalErrorCount: correct ? totalErrorCount : totalErrorCount + 1,
-                searchTime: searchTime,       // ★ここが追加された引数
-                selectionTime: selectionTime, // ★
-                resetCount: resetCount        // ★
+                taskType: "Number",
+                trialNumber: currentTrialIndex,
+                targetId: expectedDigit.ToString(),
+                selectedId: digitStr,
+                isSuccess: correct,
+                selectionTime: selectionTime,
+                searchTime: searchTime,
+                targetPosScreen: targetPos,
+                hitPosScreen: hitPos,
+                resetCount: resetCount,
+                errorType: errorType
             );
         }
 
-        // --- 共通処理（一発勝負ロジック） ---
-        // 正誤に関わらず入力文字を進める
         currentInput = after;
+        if (inputText != null) inputText.text = currentInput;
 
-        if (inputText != null)
-            inputText.text = currentInput;
-
-        // 桁数が揃ったら次のトライアルへ
         if (currentInput.Length == currentTarget.Length)
         {
-            float rt = Time.time - trialStartTime;
-            Debug.Log($"[NumberTask] Trial {currentTrialIndex} COMPLETED. RT = {rt:F3}");
-
             currentTrialIndex++;
             StartTrial();
         }
 
         if (correct)
         {
-            return true; // 正解音
+            return true;
         }
         else
         {
             HandleError();
-            Debug.Log($"[NumberTask] WRONG digit {digit} (expected {expectedDigit})");
-            return false; // エラー音
+            return false;
         }
     }
 

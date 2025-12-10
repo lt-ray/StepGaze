@@ -3,14 +3,15 @@ using TMPro;
 using UnityEngine.UI;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 
 public class RandomizedNumberTaskManager : MonoBehaviour
 {
     public static RandomizedNumberTaskManager Instance;
 
     [Header("UI 参照")]
-    public TextMeshProUGUI targetText; // 現在の1文字だけを表示
-    public TextMeshProUGUI inputText;  // ★入力履歴（今回は表示更新しませんが、参照は残します）
+    public TextMeshProUGUI targetText; 
+    public TextMeshProUGUI inputText;  
 
     [Header("エラー演出")]
     public Image errorOverlay;
@@ -19,33 +20,59 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     [Header("ボタン参照")]
     [SerializeField] private List<GazeButton> buttons; 
 
-    [Header("タスク設定")]
-    [SerializeField] private string[] targets = { "5372", "149", "80" };
-    private int currentTrialIndex = 0; // どのターゲット文字列か
-    private int currentCharIndex = 0;  // その文字列の何文字目か
+    [Header("実験設定")]
+    [Range(0, 4)] public int scenarioID = 0; 
 
     [System.Serializable]
-    public class KeyLayoutData
+    public class RandomScenarioData
     {
-        public int[] keys;
+        public string name;
+        public int[] targetValues;
+        public int[] targetPositions;
     }
 
-    [Header("キー値の配置シーケンス")]
-    [SerializeField]
-    private List<KeyLayoutData> keyLayoutSequences = new List<KeyLayoutData>()
+    [Header("シナリオデータ (Inspectorで編集可能)")]
+    public List<RandomScenarioData> scenarios = new List<RandomScenarioData>()
     {
-        new KeyLayoutData { keys = new int[] { 1, 4, 2, 3, 5, 6, 9, 7, 8, 10, 11, 0 } },
-        new KeyLayoutData { keys = new int[] { 0, 9, 8, 7, 6, 5, 4, 3, 2, 1, 11, 10 } },
-        new KeyLayoutData { keys = new int[] { 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 } }
+        new RandomScenarioData { 
+            name = "Pattern A", 
+            targetValues = new int[] { 11, 4, 10, 3, 2, 6, 8, 5, 7, 5, 8, 9, 1, 0, 11 }, 
+            targetPositions = new int[] { 3, 8, 5, 3, 4, 0, 2, 11, 0, 7, 4, 7, 2, 0, 3 } 
+        },
+        new RandomScenarioData { 
+            name = "Pattern B", 
+            targetValues = new int[] { 6, 3, 10, 5, 3, 1, 7, 11, 4, 8, 10, 2, 9, 0, 0 }, 
+            targetPositions = new int[] { 0, 8, 11, 4, 7, 10, 2, 9, 0, 2, 11, 0, 11, 6, 8 } 
+        },
+        new RandomScenarioData { 
+            name = "Pattern C", 
+            targetValues = new int[] { 9, 3, 8, 0, 4, 6, 10, 1, 10, 7, 2, 11, 5, 1, 6 }, 
+            targetPositions = new int[] { 2, 0, 6, 3, 11, 1, 11, 8, 10, 3, 11, 9, 3, 0, 2 } 
+        },
+        new RandomScenarioData { 
+            name = "Pattern D", 
+            targetValues = new int[] { 1, 0, 4, 6, 10, 1, 9, 2, 7, 10, 3, 3, 5, 8, 11 }, 
+            targetPositions = new int[] { 10, 8, 2, 7, 0, 8, 3, 0, 1, 4, 11, 2, 10, 4, 7 } 
+        },
+        new RandomScenarioData { 
+            name = "Pattern E", 
+            targetValues = new int[] { 11, 11, 2, 9, 0, 6, 7, 2, 1, 1, 3, 8, 4, 10, 5 }, 
+            targetPositions = new int[] { 7, 4, 7, 6, 3, 4, 11, 7, 6, 4, 0, 11, 8, 11, 8 } 
+        }
     };
 
+    [Header("配置シャッフル用のシード値")]
+    public int[] layoutSeeds = { 12345, 67890, 11111, 22222, 33333 };
+
+    private int currentTrialIndex = 0; 
+    private int currentCharIndex = 0;  
     private string currentInput = ""; 
     private float trialStartTime = 0f;
     private int totalErrorCount = 0;
 
     public int CurrentTrialIndex => currentTrialIndex;
     public int CurrentInputLength => currentInput.Length;
-    public string CurrentTarget => (targets.Length > currentTrialIndex) ? targets[currentTrialIndex] : "";
+    public string CurrentTarget => GetCurrentTargetString();
     public string CurrentInput => currentInput;
     public float CurrentTrialStartTime => trialStartTime;
     public int CurrentTotalErrorCount => totalErrorCount;
@@ -59,12 +86,31 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     private void Start()
     {
         if (errorOverlay != null) errorOverlay.gameObject.SetActive(false);
+        if (inputText != null) inputText.text = "";
+        
+        scenarioID = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
+        Debug.Log($"[RandomTask] Initialized with Scenario {scenarioID}");
+
         StartTrial();
+    }
+
+    private void Update()
+    {
+        if (currentTrialIndex >= 15) return; 
+
+        if (ExperimentLogger.Instance == null || GazeManager.Instance == null) return;
+
+        ExperimentLogger.Instance.LogStreamData(
+            GazeManager.Instance.GazeScreenPosition,
+            CurrentTarget, 
+            "RandomTask_Searching",
+            true
+        );
     }
 
     private void StartTrial()
     {
-        if (currentTrialIndex >= targets.Length)
+        if (currentTrialIndex >= 15)
         {
             Debug.Log("All Randomized Tasks Completed.");
             if (targetText != null) targetText.text = "Finish";
@@ -73,55 +119,81 @@ public class RandomizedNumberTaskManager : MonoBehaviour
 
         currentCharIndex = 0;
         currentInput = "";
-
-        // ★開始時にテキストを空にする（以降は更新しないので見えなくなります）
         if (inputText != null) inputText.text = "";
 
         trialStartTime = Time.time;
 
-        ShuffleLayout();
+        var allButtons = FindObjectsOfType<GazeButton>();
+        foreach (var btn in allButtons) btn.ResetGazeTime();
+
+        ApplyLayoutForCurrentTrial();
         UpdateUI();
 
-        Debug.Log($"[RandomizedNumberTask] Trial {currentTrialIndex} start. Target String = {targets[currentTrialIndex]}");
+        Debug.Log($"[RandomizedNumberTask] Trial {currentTrialIndex} start. Target = {CurrentTarget}");
     }
 
     private void UpdateUI()
     {
-        if (currentTrialIndex >= targets.Length) return;
-
-        string fullTarget = targets[currentTrialIndex];
+        if (currentTrialIndex >= 15) return;
+        string fullTarget = GetCurrentTargetString();
         
-        // ターゲット（現在の1文字）のみ表示
-        if (currentCharIndex < fullTarget.Length)
-        {
-            if (targetText != null) 
-                targetText.text = fullTarget[currentCharIndex].ToString();
-        }
-        else
-        {
-            if (targetText != null) targetText.text = "";
-        }
+        if (targetText != null) 
+            targetText.text = fullTarget;
     }
 
-    private void ShuffleLayout()
+    private string GetCurrentTargetString()
     {
-        if (keyLayoutSequences == null || keyLayoutSequences.Count == 0) return;
-        if (buttons == null || buttons.Count == 0) return;
+        if (currentTrialIndex >= 15) return "";
+        int id = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
+        int val = scenarios[id].targetValues[currentTrialIndex];
+        return KeyValueToString(val);
+    }
 
-        int randIndex = Random.Range(0, keyLayoutSequences.Count);
-        int[] currentLayout = keyLayoutSequences[randIndex].keys;
+    private void ApplyLayoutForCurrentTrial()
+    {
+        if (buttons == null || buttons.Count < 12) return;
 
-        for (int i = 0; i < buttons.Count && i < currentLayout.Length; i++)
+        int id = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
+        int targetVal = scenarios[id].targetValues[currentTrialIndex];
+        int targetPos = scenarios[id].targetPositions[currentTrialIndex];
+
+        Random.InitState(layoutSeeds[id] + currentTrialIndex);
+
+        List<int> distractors = new List<int>();
+        for (int i = 0; i <= 11; i++)
         {
-            if (buttons[i] == null) continue;
-            buttons[i].keyValue = currentLayout[i];
+            if (i != targetVal) distractors.Add(i);
+        }
 
-            var buttonText = buttons[i].GetComponentInChildren<TextMeshProUGUI>();
-            if (buttonText != null)
+        int n = distractors.Count;
+        while (n > 1)
+        {
+            n--;
+            int k = Random.Range(0, n + 1);
+            int value = distractors[k];
+            distractors[k] = distractors[n];
+            distractors[n] = value;
+        }
+
+        int distractorIdx = 0;
+        for (int i = 0; i < buttons.Count; i++)
+        {
+            int valToSet;
+            if (i == targetPos)
             {
-                if (buttons[i].keyValue == 10) buttonText.text = "a";
-                else if (buttons[i].keyValue == 11) buttonText.text = "b";
-                else buttonText.text = buttons[i].keyValue.ToString();
+                valToSet = targetVal;
+            }
+            else
+            {
+                valToSet = distractors[distractorIdx];
+                distractorIdx++;
+            }
+
+            buttons[i].keyValue = valToSet;
+
+            if (buttons[i].valueText != null)
+            {
+                buttons[i].valueText.text = KeyValueToString(valToSet);
             }
         }
     }
@@ -145,58 +217,42 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     private string GetCurrentConditionString()
     {
         if (buttons != null && buttons.Count > 0 && buttons[0] != null)
-            return $"{buttons[0].selectionMode}_Areas{(int)buttons[0].decisionAreaCount}";
+            return buttons[0].GetConditionString();
         return "Unknown";
     }
 
-    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount)
+    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount, Vector2 targetPos, Vector2 hitPos)
     {
-        if (currentTrialIndex >= targets.Length) return false;
+        if (currentTrialIndex >= 15) return false;
 
-        string fullTarget = targets[currentTrialIndex];
-        if (currentCharIndex >= fullTarget.Length) return false;
-
-        char targetChar = fullTarget[currentCharIndex];
-        int expectedDigit = CharToKeyValue(targetChar);
-        bool correct = (digit == expectedDigit);
+        string fullTarget = GetCurrentTargetString();
+        bool correct = (KeyValueToString(digit) == fullTarget);
 
         if (ExperimentLogger.Instance != null)
         {
-            ExperimentLogger.Instance.LogKeyEvent(
-                taskType: "Number", 
+            string errorType = correct ? "" : "MidasTouch";
+
+            ExperimentLogger.Instance.LogTrialResult(
                 condition: GetCurrentConditionString(),
-                trialIndex: currentTrialIndex,
-                keyIndex: currentCharIndex,
-                target: fullTarget, 
-                expected: expectedDigit.ToString(), 
-                inputDigit: digit.ToString(),
-                isCorrect: correct,
-                currentInputAfter: currentInput + KeyValueToString(digit),
-                trialStartTime: trialStartTime,
-                totalErrorCount: correct ? totalErrorCount : totalErrorCount + 1,
-                searchTime: searchTime,       
-                selectionTime: selectionTime, 
-                resetCount: resetCount        
+                taskType: "RandomNumber",
+                trialNumber: currentTrialIndex,
+                targetId: fullTarget,
+                selectedId: KeyValueToString(digit),
+                isSuccess: correct,
+                selectionTime: selectionTime,
+                searchTime: searchTime,
+                targetPosScreen: targetPos,
+                hitPosScreen: hitPos,
+                resetCount: resetCount,
+                errorType: errorType
             );
         }
 
-        // 共通処理
-        currentCharIndex++;
-        currentInput += KeyValueToString(digit);
-
-        // ★ inputText.text = currentInput; を削除しました（画面表示しない）
-        // if (inputText != null) inputText.text = currentInput; 
-
-        ShuffleLayout();
-        UpdateUI();
-
-        if (currentCharIndex >= fullTarget.Length)
-        {
-            float rt = Time.time - trialStartTime;
-            Debug.Log($"[RandomizedNumberTask] Trial {currentTrialIndex} COMPLETED. RT = {rt:F3}");
-            currentTrialIndex++;
-            StartTrial();
-        }
+        float rt = Time.time - trialStartTime;
+        Debug.Log($"[RandomTask] Trial {currentTrialIndex} END. Result={(correct?"OK":"NG")} RT={rt:F3}");
+        
+        currentTrialIndex++;
+        StartTrial();
 
         if (correct)
         {
