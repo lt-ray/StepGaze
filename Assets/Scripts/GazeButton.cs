@@ -65,7 +65,6 @@ public class GazeButton : MonoBehaviour
 
     [HideInInspector] public Color currentBaseColor = Color.white;
 
-    // 内部変数
     private RectTransform rect;
     private float gazeTimer = 0f;
     private bool areasSpawned = false;
@@ -80,40 +79,37 @@ public class GazeButton : MonoBehaviour
     private bool isSortedToFront = false;
     private UnityEngine.UI.LayoutGroup parentLayoutGroup; 
 
-    // デバッグ・静的
     public TextMeshProUGUI countText;
     static private int confirmCount = 0;
     private static GazeButton activeSequentialButton = null;
 
-    // ログ用
+    // ログ用変数
     private float buttonGazeStartTime = -1f; 
     private float lastPhaseTime       = -1f; 
     private float firstGazeTime = -1f; 
     private int localResetCount = 0;   
     private bool wasGazedThisButtonLastFrame = false;
 
+    // ★エリア突入時間記録用 (試行開始からの経過時間)
+    private float enterArea1Time = 0f;
+    private float enterArea2Time = 0f;
+
     private void Awake()
     {
         rect = GetComponent<RectTransform>();
         originalScale = transform.localScale; 
-
         if (valueText == null) valueText = GetComponentInChildren<TextMeshProUGUI>();
-
         if (valueText != null)
         {
             if (keyValue == 10) valueText.text = "a";
-            else if (keyValue == 11) valueText.text = "b";
+            else if (keyValue == 11) valueText.text = "e";
             else valueText.text = keyValue.ToString();
         }
-        
         var img = GetComponent<Image>();
         if(img != null) currentBaseColor = img.color;
-
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
-
-        if (transform.parent != null)
-            parentLayoutGroup = transform.parent.GetComponent<UnityEngine.UI.LayoutGroup>();
+        if (transform.parent != null) parentLayoutGroup = transform.parent.GetComponent<UnityEngine.UI.LayoutGroup>();
     }
    
     private void Update()
@@ -128,15 +124,13 @@ public class GazeButton : MonoBehaviour
         if (gazed != null)
         {
             gazedArea = gazed.GetComponentInParent<GazeDecisionArea>();
-            if (gazedArea != null && gazedArea.owner != null)
-                gazedButton = gazedArea.owner;
-            else
-                gazedButton = gazed.GetComponentInParent<GazeButton>();
+            if (gazedArea != null && gazedArea.owner != null) gazedButton = gazedArea.owner;
+            else gazedButton = gazed.GetComponentInParent<GazeButton>();
         }
 
         bool onThisButton = (gazedButton == this);
-
         Vector3 targetScale = onThisButton ? hoverScale : originalScale;
+        
         if (onThisButton && !isSortedToFront) SortButtonToFront();
         else if (!onThisButton && !areasSpawned && isSortedToFront) RestoreButtonSort();
         
@@ -148,17 +142,11 @@ public class GazeButton : MonoBehaviour
             if (onThisButton && !isLookingAtAnyDecisionArea) areaLifeTimer = 0f; 
             else areaLifeTimer += Time.deltaTime;
 
-            if (areaLifeTimer >= autoResetTime)
-            {
-                ResetState();
-                return; 
-            }
+            if (areaLifeTimer >= autoResetTime) { ResetState(); return; }
         }
 
         if (selectionMode == SelectionMode.SequentialAreas &&
-            activeSequentialButton != null &&
-            gazedButton != null &&
-            gazedButton != activeSequentialButton)
+            activeSequentialButton != null && gazedButton != null && gazedButton != activeSequentialButton)
         {
             activeSequentialButton.ResetState();
         }
@@ -173,22 +161,11 @@ public class GazeButton : MonoBehaviour
         if (onThisButton)
         {
             gazeTimer += Time.deltaTime;
-
             if (selectionMode == SelectionMode.DwellOnly)
             {
-                if (dwellLocked)
-                {
-                    SetDwellProgress(0f);
-                    wasGazedThisButtonLastFrame = onThisButton;
-                    return;
-                }
+                if (dwellLocked) { SetDwellProgress(0f); wasGazedThisButtonLastFrame = onThisButton; return; }
                 SetDwellProgress(gazeTimer / dwellToConfirm);
-                if (gazeTimer >= dwellToConfirm)
-                {
-                    OnConfirmed();
-                    dwellLocked = true;
-                    SetDwellProgress(0f);
-                }
+                if (gazeTimer >= dwellToConfirm) { OnConfirmed(); dwellLocked = true; SetDwellProgress(0f); }
             }
             else if (selectionMode == SelectionMode.SequentialAreas)
             {
@@ -204,49 +181,23 @@ public class GazeButton : MonoBehaviour
         }
         else
         {
-            gazeTimer = 0f;
-            dwellLocked = false;
-            SetDwellProgress(0f);
-            if (selectionMode == SelectionMode.DwellOnly)
-            {
-                var img = GetComponent<Image>();
-                if (img != null) img.color = currentBaseColor; 
-            }
+            gazeTimer = 0f; dwellLocked = false; SetDwellProgress(0f);
+            if (selectionMode == SelectionMode.DwellOnly) { var img = GetComponent<Image>(); if (img != null) img.color = currentBaseColor; }
         }
-
         wasGazedThisButtonLastFrame = onThisButton;
     }
 
-    private void SetDwellProgress(float t)
-    {
-        if (dwellRingImage == null) return;
-        t = Mathf.Clamp01(t);
-        dwellRingImage.enabled = (t > 0f);
-        dwellRingImage.fillAmount = t;
-    }
-
-    private void SortButtonToFront()
-    {
-        if (isSortedToFront) return;
-        originalSiblingIndex = transform.GetSiblingIndex();
-        if (parentLayoutGroup != null) parentLayoutGroup.enabled = false;
-        transform.SetAsLastSibling();
-        isSortedToFront = true;
-    }
-
-    private void RestoreButtonSort()
-    {
-        if (!isSortedToFront) return;
-        transform.SetSiblingIndex(originalSiblingIndex);
-        if (parentLayoutGroup != null) parentLayoutGroup.enabled = true;
-        isSortedToFront = false;
-    }
-
+    private void SetDwellProgress(float t) { if (dwellRingImage == null) return; t = Mathf.Clamp01(t); dwellRingImage.enabled = (t > 0f); dwellRingImage.fillAmount = t; }
+    private void SortButtonToFront() { if (isSortedToFront) return; originalSiblingIndex = transform.GetSiblingIndex(); if (parentLayoutGroup != null) parentLayoutGroup.enabled = false; transform.SetAsLastSibling(); isSortedToFront = true; }
+    private void RestoreButtonSort() { if (!isSortedToFront) return; transform.SetSiblingIndex(originalSiblingIndex); if (parentLayoutGroup != null) parentLayoutGroup.enabled = true; isSortedToFront = false; }
     private int GetDecisionAreaCountValue() => (int)decisionAreaCount;
 
     private void SpawnDecisionAreas()
     {
         areaLifeTimer = 0f;
+        enterArea1Time = 0f; // リセット
+        enterArea2Time = 0f;
+
         if (decisionAreaCount == DecisionAreaCount.One) CreateArea(oneAreaOffset1, 1);
         else if (decisionAreaCount == DecisionAreaCount.Two) { CreateArea(twoAreaOffset1, 1); CreateArea(twoAreaOffset2, 2); }
         else if (decisionAreaCount == DecisionAreaCount.Three) { CreateArea(threeAreaOffset1, 1); CreateArea(threeAreaOffset2, 2); CreateArea(threeAreaOffset3, 3); }
@@ -259,30 +210,32 @@ public class GazeButton : MonoBehaviour
         RectTransform parent = rect.parent as RectTransform;
         RectTransform areaRect = Instantiate(decisionAreaPrefab, parent);
         areaRect.anchoredPosition = rect.anchoredPosition + offset;
-
         var img = areaRect.GetComponent<Image>();
-        if (img != null)
-        {
-            if (index == 1) img.color = area1Color;
-            else if (index == 2) img.color = area2Color;
-            else if (index == 3) img.color = area3Color;
-        }
-
+        if (img != null) { if (index == 1) img.color = area1Color; else if (index == 2) img.color = area2Color; else if (index == 3) img.color = area3Color; }
         var script = areaRect.GetComponent<GazeDecisionArea>();
         script.index = index;
         script.owner = this;
-        if (index == 1) script.dwellDuration = area1Dwell;
-        else if (index == 2) script.dwellDuration = area2Dwell;
-        else if (index == 3) script.dwellDuration = area3Dwell;
-
+        if (index == 1) script.dwellDuration = area1Dwell; else if (index == 2) script.dwellDuration = area2Dwell; else if (index == 3) script.dwellDuration = area3Dwell;
         spawnedAreas.Add(script);
+    }
+
+    // ★エリアに入った瞬間に呼ばれる
+    public void OnAreaEnter(int index)
+    {
+        float trialStart = 0f;
+        if (DotTaskManager.Instance != null) trialStart = DotTaskManager.Instance.CurrentTrialStartTime;
+        else if (RandomizedNumberTaskManager.Instance != null) trialStart = RandomizedNumberTaskManager.Instance.CurrentTrialStartTime;
+
+        float elapsed = Time.time - trialStart;
+
+        // 最初の突入時刻だけ記録（チャタリング防止）
+        if (index == 1 && enterArea1Time == 0f) enterArea1Time = elapsed;
+        else if (index == 2 && enterArea2Time == 0f) enterArea2Time = elapsed;
     }
 
     public void OnAreaPassed(int index, GazeDecisionArea area)
     {
-        if (isFreezing) return;
-        if (selectionMode != SelectionMode.SequentialAreas) return;
-
+        if (isFreezing || selectionMode != SelectionMode.SequentialAreas) return;
         int total = GetDecisionAreaCountValue();
         float now = Time.time;
 
@@ -298,11 +251,7 @@ public class GazeButton : MonoBehaviour
 
     private void HighlightNextArea()
     {
-        foreach (var area in spawnedAreas)
-        {
-            if (area == null) continue;
-            if (area.index == nextExpectedIndex) { area.SetColor(nextAreaColor); break; }
-        }
+        foreach (var area in spawnedAreas) { if (area == null) continue; if (area.index == nextExpectedIndex) { area.SetColor(nextAreaColor); break; } }
     }
 
     private void OnConfirmed()
@@ -313,7 +262,6 @@ public class GazeButton : MonoBehaviour
         float trialStartTime = 0f;
         if (DotTaskManager.Instance != null) trialStartTime = DotTaskManager.Instance.CurrentTrialStartTime;
         else if (RandomizedNumberTaskManager.Instance != null) trialStartTime = RandomizedNumberTaskManager.Instance.CurrentTrialStartTime;
-        else if (NumberTaskManager.Instance != null) trialStartTime = NumberTaskManager.Instance.CurrentTrialStartTime;
 
         float searchTime = (firstGazeTime > 0) ? Mathf.Max(0, firstGazeTime - trialStartTime) : 0;
         float selectionTime = (firstGazeTime > 0) ? (now - firstGazeTime) : 0;
@@ -326,10 +274,7 @@ public class GazeButton : MonoBehaviour
         {
             Canvas canvas = GetComponentInParent<Canvas>();
             Camera cam = null;
-            if (canvas.renderMode == RenderMode.ScreenSpaceCamera || canvas.renderMode == RenderMode.WorldSpace)
-            {
-                cam = canvas.worldCamera; 
-            }
+            if (canvas.renderMode == RenderMode.ScreenSpaceCamera || canvas.renderMode == RenderMode.WorldSpace) cam = canvas.worldCamera; 
             targetPos = RectTransformUtility.WorldToScreenPoint(cam, rect.position);
         }
 
@@ -337,17 +282,9 @@ public class GazeButton : MonoBehaviour
         if (isNumberKey)
         {
             if (DotTaskManager.Instance != null)
-            {
-                isCorrect = DotTaskManager.Instance.OnDigitConfirmed(keyValue, searchTime, selectionTime, localResetCount, targetPos, hitPos);
-            }
+                isCorrect = DotTaskManager.Instance.OnDigitConfirmed(keyValue, searchTime, selectionTime, enterArea1Time, enterArea2Time, localResetCount, targetPos, hitPos);
             else if (RandomizedNumberTaskManager.Instance != null)
-            {
-                isCorrect = RandomizedNumberTaskManager.Instance.OnDigitConfirmed(keyValue, searchTime, selectionTime, localResetCount, targetPos, hitPos);
-            }
-            else if (NumberTaskManager.Instance != null)
-            {
-                isCorrect = NumberTaskManager.Instance.OnDigitConfirmed(keyValue, searchTime, selectionTime, localResetCount, targetPos, hitPos);
-            }
+                isCorrect = RandomizedNumberTaskManager.Instance.OnDigitConfirmed(keyValue, searchTime, selectionTime, enterArea1Time, enterArea2Time, localResetCount, targetPos, hitPos);
         }
 
         if (audioSource != null)
@@ -358,58 +295,34 @@ public class GazeButton : MonoBehaviour
 
         confirmCount++;
         if (countText != null) countText.text = "Count: " + confirmCount;
-
         var img = GetComponent<Image>();
         if (img != null) img.color = isCorrect ? correctColor : errorColor;
 
         float waitTime = isCorrect ? correctFeedbackDuration : errorFeedbackDuration;
         StartCoroutine(WaitAndResetRoutine(waitTime));
         
-        buttonGazeStartTime = -1f;
-        lastPhaseTime       = -1f;
-        firstGazeTime = -1f;
-        localResetCount = 0;
+        buttonGazeStartTime = -1f; lastPhaseTime = -1f; firstGazeTime = -1f; localResetCount = 0;
+        enterArea1Time = 0f; enterArea2Time = 0f;
     }
 
-    private IEnumerator WaitAndResetRoutine(float duration)
-    {
-        isFreezing = true; 
-        yield return new WaitForSeconds(duration);
-        ResetState();
-        isFreezing = false; 
-    }
-
+    private IEnumerator WaitAndResetRoutine(float duration) { isFreezing = true; yield return new WaitForSeconds(duration); ResetState(); isFreezing = false; }
     private void ResetState()
     {
         if (!isFreezing && areasSpawned && nextExpectedIndex > 1) localResetCount++;
-
         foreach (var area in spawnedAreas) if (area != null) Destroy(area.gameObject);
         spawnedAreas.Clear();
-
-        areasSpawned = false;
-        nextExpectedIndex = 1;
-        gazeTimer = 0f;
-        areaLifeTimer = 0f;
-
-        transform.localScale = originalScale;
-        RestoreButtonSort();
-
+        areasSpawned = false; nextExpectedIndex = 1; gazeTimer = 0f; areaLifeTimer = 0f;
+        transform.localScale = originalScale; RestoreButtonSort();
         if (activeSequentialButton == this) activeSequentialButton = null;
-
-        var img = GetComponent<Image>();
-        if (img != null) img.color = currentBaseColor; 
+        var img = GetComponent<Image>(); if (img != null) img.color = currentBaseColor;
+        enterArea1Time = 0f; enterArea2Time = 0f;
     }
 
     public void ResetGazeTime()
     {
-        firstGazeTime = -1f;
-        buttonGazeStartTime = -1f;
-        lastPhaseTime = -1f;
-        localResetCount = 0;
+        firstGazeTime = -1f; buttonGazeStartTime = -1f; lastPhaseTime = -1f; localResetCount = 0;
+        enterArea1Time = 0f; enterArea2Time = 0f;
     }
 
-    public string GetConditionString()
-    {
-        return $"{selectionMode}_Areas{(int)decisionAreaCount}";
-    }
+    public string GetConditionString() => $"{selectionMode}_Areas{(int)decisionAreaCount}";
 }

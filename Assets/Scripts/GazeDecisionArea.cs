@@ -10,13 +10,9 @@ public class GazeDecisionArea : MonoBehaviour
     private bool wasGazedLastFrame = false;
     private bool passedInThisStay = false;
     private float gazeTimer = 0f;
-
     private Image img;
 
-    private void Awake()
-    {
-        img = GetComponent<Image>();
-    }
+    private void Awake() { img = GetComponent<Image>(); }
 
     private void Update()
     {
@@ -25,16 +21,16 @@ public class GazeDecisionArea : MonoBehaviour
         GameObject gazed = GazeManager.Instance.GetGazedUI();
         bool nowGazed = (gazed == gameObject);
 
+        // ★ エリアに入った瞬間を検知
+        if (nowGazed && !wasGazedLastFrame)
+        {
+            owner.OnAreaEnter(index); // 親に通知
+        }
+
         if (nowGazed)
         {
-            if (!wasGazedLastFrame)
-            {
-                gazeTimer = 0f;
-                passedInThisStay = false;
-            }
-
+            if (!wasGazedLastFrame) { gazeTimer = 0f; passedInThisStay = false; }
             gazeTimer += Time.deltaTime;
-
             if (!passedInThisStay && gazeTimer >= dwellDuration)
             {
                 passedInThisStay = true;
@@ -46,7 +42,6 @@ public class GazeDecisionArea : MonoBehaviour
             gazeTimer = 0f;
             passedInThisStay = false;
         }
-
         wasGazedLastFrame = nowGazed;
     }
 
@@ -56,9 +51,5 @@ public class GazeDecisionArea : MonoBehaviour
         foreach (var g in graphics) g.enabled = visible;
     }
 
-    public void SetColor(Color c)
-    {
-        if (img == null) img = GetComponent<Image>();
-        if (img != null) img.color = c;
-    }
+    public void SetColor(Color c) { if (img == null) img = GetComponent<Image>(); if (img != null) img.color = c; }
 }

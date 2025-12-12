@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
+[RequireComponent(typeof(AudioSource))]
 public class RandomizedNumberTaskManager : MonoBehaviour
 {
     public static RandomizedNumberTaskManager Instance;
@@ -19,6 +20,11 @@ public class RandomizedNumberTaskManager : MonoBehaviour
 
     [Header("ボタン参照")]
     [SerializeField] private List<GazeButton> buttons; 
+
+    [Header("音声ガイド設定")]
+    [Tooltip("0, 1, ..., 9, a(10), e(11) の順でクリップを登録してください")]
+    public List<AudioClip> targetClips; 
+    private AudioSource audioSource;
 
     [Header("実験設定")]
     [Range(0, 4)] public int scenarioID = 0; 
@@ -81,6 +87,12 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
+
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        
+        // ★ループ設定をONにする
+        audioSource.loop = true;
     }
 
     private void Start()
@@ -97,15 +109,8 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     private void Update()
     {
         if (currentTrialIndex >= 15) return; 
-
         if (ExperimentLogger.Instance == null || GazeManager.Instance == null) return;
-
-        ExperimentLogger.Instance.LogStreamData(
-            GazeManager.Instance.GazeScreenPosition,
-            CurrentTarget, 
-            "RandomTask_Searching",
-            true
-        );
+        ExperimentLogger.Instance.LogStreamData(GazeManager.Instance.GazeScreenPosition, CurrentTarget, "RandomTask_Searching", true);
     }
 
     private void StartTrial()
@@ -114,12 +119,19 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         {
             Debug.Log("All Randomized Tasks Completed.");
             if (targetText != null) targetText.text = "Finish";
+            
+            // ★終了時は音を止める
+            if (audioSource.isPlaying) audioSource.Stop();
+            
             return;
         }
 
         currentCharIndex = 0;
         currentInput = "";
         if (inputText != null) inputText.text = "";
+
+        // ★音声再生開始（ループ）
+        PlayTargetVoiceLoop();
 
         trialStartTime = Time.time;
 
@@ -132,13 +144,33 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         Debug.Log($"[RandomizedNumberTask] Trial {currentTrialIndex} start. Target = {CurrentTarget}");
     }
 
+    // ★ループ再生用メソッドに変更
+    private void PlayTargetVoiceLoop()
+    {
+        if (currentTrialIndex >= 15) return;
+        
+        int id = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
+        int val = scenarios[id].targetValues[currentTrialIndex]; 
+
+        if (targetClips != null && val < targetClips.Count)
+        {
+            if (targetClips[val] != null)
+            {
+                // 現在再生中の音があれば止めて、新しい音をループ再生する
+                audioSource.Stop();
+                audioSource.clip = targetClips[val];
+                audioSource.loop = true; // ループ有効化
+                audioSource.Play();
+            }
+        }
+    }
+
     private void UpdateUI()
     {
         if (currentTrialIndex >= 15) return;
         string fullTarget = GetCurrentTargetString();
-        
-        if (targetText != null) 
-            targetText.text = fullTarget;
+        // 画面上部にも一応表示（不要ならコメントアウト可）
+        if (targetText != null) targetText.text = fullTarget; 
     }
 
     private string GetCurrentTargetString()
@@ -190,7 +222,8 @@ public class RandomizedNumberTaskManager : MonoBehaviour
             }
 
             buttons[i].keyValue = valToSet;
-
+            
+            // valueTextのみ変更
             if (buttons[i].valueText != null)
             {
                 buttons[i].valueText.text = KeyValueToString(valToSet);
@@ -202,7 +235,7 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     {
         if (char.IsDigit(c)) return int.Parse(c.ToString());
         else if (c == 'a' || c == 'A') return 10;
-        else if (c == 'b' || c == 'B') return 11;
+        else if (c == 'e' || c == 'E') return 11; // 'e'
         return -1;
     }
 
@@ -210,7 +243,7 @@ public class RandomizedNumberTaskManager : MonoBehaviour
     {
         if (val >= 0 && val <= 9) return val.ToString();
         if (val == 10) return "a";
-        if (val == 11) return "b";
+        if (val == 11) return "e"; // 'e'
         return "?";
     }
 
@@ -221,7 +254,7 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         return "Unknown";
     }
 
-    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount, Vector2 targetPos, Vector2 hitPos)
+    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, float t1, float t2, int resetCount, Vector2 targetPos, Vector2 hitPos)
     {
         if (currentTrialIndex >= 15) return false;
 
@@ -231,7 +264,6 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         if (ExperimentLogger.Instance != null)
         {
             string errorType = correct ? "" : "MidasTouch";
-
             ExperimentLogger.Instance.LogTrialResult(
                 condition: GetCurrentConditionString(),
                 taskType: "RandomNumber",
@@ -241,6 +273,8 @@ public class RandomizedNumberTaskManager : MonoBehaviour
                 isSuccess: correct,
                 selectionTime: selectionTime,
                 searchTime: searchTime,
+                area1EnterTime: t1,
+                area2EnterTime: t2,
                 targetPosScreen: targetPos,
                 hitPosScreen: hitPos,
                 resetCount: resetCount,
@@ -252,17 +286,10 @@ public class RandomizedNumberTaskManager : MonoBehaviour
         Debug.Log($"[RandomTask] Trial {currentTrialIndex} END. Result={(correct?"OK":"NG")} RT={rt:F3}");
         
         currentTrialIndex++;
-        StartTrial();
+        StartTrial(); // 次の試行へ（ここで音が切り替わります）
 
-        if (correct)
-        {
-            return true; 
-        }
-        else
-        {
-            HandleError();
-            return false; 
-        }
+        if (correct) return true; 
+        else { HandleError(); return false; }
     }
 
     private void HandleError()

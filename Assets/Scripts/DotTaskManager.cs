@@ -20,19 +20,16 @@ public class DotTaskManager : MonoBehaviour
     [Range(0, 4)] public int scenarioID = 0; 
 
     [System.Serializable]
-    public class ScenarioData
-    {
-        public string[] targets;
-    }
+    public class ScenarioData { public string[] targets; }
 
     [Header("シナリオデータ (Inspectorで編集可能)")]
     public List<ScenarioData> scenarios = new List<ScenarioData>()
     {
-        new ScenarioData { targets = new string[] { "0", "b", "0", "9", "2", "8", "7", "4", "3", "4", "1", "b", "6", "9", "3", "5", "6", "1", "7", "5", "2", "a", "8", "a" } },
-        new ScenarioData { targets = new string[] { "a", "1", "a", "2", "4", "7", "6", "5", "8", "2", "0", "7", "1", "9", "0", "b", "4", "6", "8", "3", "b", "5", "3", "9" } },
-        new ScenarioData { targets = new string[] { "1", "5", "0", "6", "5", "2", "8", "6", "4", "3", "9", "a", "7", "2", "9", "7", "8", "3", "4", "b", "1", "a", "0", "b" } },
-        new ScenarioData { targets = new string[] { "b", "4", "6", "2", "8", "3", "5", "1", "a", "1", "9", "7", "0", "a", "4", "6", "8", "7", "2", "5", "b", "0", "9", "3" } },
-        new ScenarioData { targets = new string[] { "6", "9", "5", "9", "1", "7", "4", "5", "2", "8", "3", "a", "2", "0", "b", "8", "3", "0", "7", "4", "b", "1", "a", "6" } }
+        new ScenarioData { targets = new string[] { "0", "e", "0", "9", "2", "8", "7", "4", "3", "4", "1", "e", "6", "9", "3", "5", "6", "1", "7", "5", "2", "a", "8", "a" } },
+        new ScenarioData { targets = new string[] { "a", "1", "a", "2", "4", "7", "6", "5", "8", "2", "0", "7", "1", "9", "0", "e", "4", "6", "8", "3", "e", "5", "3", "9" } },
+        new ScenarioData { targets = new string[] { "1", "5", "0", "6", "5", "2", "8", "6", "4", "3", "9", "a", "7", "2", "9", "7", "8", "3", "4", "e", "1", "a", "0", "e" } },
+        new ScenarioData { targets = new string[] { "e", "4", "6", "2", "8", "3", "5", "1", "a", "1", "9", "7", "0", "a", "4", "6", "8", "7", "2", "5", "e", "0", "9", "3" } },
+        new ScenarioData { targets = new string[] { "6", "9", "5", "9", "1", "7", "4", "5", "2", "8", "3", "a", "2", "0", "e", "8", "3", "0", "7", "4", "e", "1", "a", "6" } }
     };
 
     private List<string> currentTargetList = new List<string>();
@@ -54,8 +51,7 @@ public class DotTaskManager : MonoBehaviour
 
     private void Awake()
     {
-        if (Instance == null) Instance = this;
-        else Destroy(gameObject);
+        if (Instance == null) Instance = this; else Destroy(gameObject);
     }
 
     private void Start()
@@ -69,23 +65,14 @@ public class DotTaskManager : MonoBehaviour
     {
         if (currentTrialIndex >= currentTargetList.Count) return;
         if (ExperimentLogger.Instance == null || GazeManager.Instance == null) return;
-
-        ExperimentLogger.Instance.LogStreamData(
-            GazeManager.Instance.GazeScreenPosition,
-            currentTarget,
-            "DotTask_Running",
-            true
-        );
+        ExperimentLogger.Instance.LogStreamData(GazeManager.Instance.GazeScreenPosition, currentTarget, "DotTask_Running", true);
     }
 
     private void LoadScenario()
     {
         currentTargetList.Clear();
         int id = Mathf.Clamp(scenarioID, 0, scenarios.Count - 1);
-        if (scenarios[id].targets != null)
-        {
-            currentTargetList.AddRange(scenarios[id].targets);
-        }
+        if (scenarios[id].targets != null) currentTargetList.AddRange(scenarios[id].targets);
         Debug.Log($"[DotTask] Loaded Scenario {id}: {currentTargetList.Count} targets.");
     }
 
@@ -97,18 +84,13 @@ public class DotTaskManager : MonoBehaviour
             if (targetText != null) targetText.text = "Finish";
             return;
         }
-
         currentTarget = currentTargetList[currentTrialIndex];
         currentInput = "";
-
         if (targetText != null) targetText.text = currentTarget;
         if (inputText != null) inputText.text = "";
-
         trialStartTime = Time.time;
-
         var allButtons = FindObjectsOfType<GazeButton>();
         foreach (var btn in allButtons) btn.ResetGazeTime();
-
         HighlightNextKey();
         Debug.Log($"[DotTask] Trial {currentTrialIndex} start. Target = {currentTarget}");
     }
@@ -117,7 +99,7 @@ public class DotTaskManager : MonoBehaviour
     {
         if (char.IsDigit(c)) return int.Parse(c.ToString());
         else if (c == 'a' || c == 'A') return 10;
-        else if (c == 'b' || c == 'B') return 11;
+        else if (c == 'e' || c == 'E') return 11;
         return -1;
     }
 
@@ -125,34 +107,23 @@ public class DotTaskManager : MonoBehaviour
     {
         if (val >= 0 && val <= 9) return val.ToString();
         if (val == 10) return "a";
-        if (val == 11) return "b";
+        if (val == 11) return "e";
         return "?";
     }
 
     private void HighlightNextKey()
     {
         if (currentInput.Length >= currentTarget.Length) return;
-
         char nextChar = currentTarget[currentInput.Length];
         int nextVal = CharToKeyValue(nextChar);
-
         var buttons = FindObjectsOfType<GazeButton>();
         foreach (var btn in buttons)
         {
             if (!btn.isNumberKey) continue;
             var img = btn.GetComponent<Image>();
             if (img == null) continue;
-
-            if (btn.keyValue == nextVal)
-            {
-                btn.currentBaseColor = targetColor;
-                img.color = targetColor;
-            }
-            else
-            {
-                btn.currentBaseColor = normalColor;
-                img.color = normalColor;
-            }
+            if (btn.keyValue == nextVal) { btn.currentBaseColor = targetColor; img.color = targetColor; }
+            else { btn.currentBaseColor = normalColor; img.color = normalColor; }
         }
     }
 
@@ -163,23 +134,19 @@ public class DotTaskManager : MonoBehaviour
         return btn.GetConditionString();
     }
 
-    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, int resetCount, Vector2 targetPos, Vector2 hitPos)
+    public bool OnDigitConfirmed(int digit, float searchTime, float selectionTime, float t1, float t2, int resetCount, Vector2 targetPos, Vector2 hitPos)
     {
         if (currentTrialIndex >= currentTargetList.Count) return false;
-
         int pos = currentInput.Length;
         if (pos >= currentTarget.Length) return false;
-
         char targetChar = currentTarget[pos];
         int expectedDigit = CharToKeyValue(targetChar);
-
         bool correct = (digit == expectedDigit);
         string digitStr = KeyValueToString(digit);
         
         if (ExperimentLogger.Instance != null)
         {
             string errorType = correct ? "" : "SelectionError";
-
             ExperimentLogger.Instance.LogTrialResult(
                 condition: GetCurrentConditionString(),
                 taskType: "DotTask",
@@ -189,6 +156,8 @@ public class DotTaskManager : MonoBehaviour
                 isSuccess: correct,
                 selectionTime: selectionTime,
                 searchTime: searchTime,
+                area1EnterTime: t1,
+                area2EnterTime: t2,
                 targetPosScreen: targetPos,
                 hitPosScreen: hitPos,
                 resetCount: resetCount,
@@ -200,38 +169,16 @@ public class DotTaskManager : MonoBehaviour
         {
             currentInput += digitStr;
             if (inputText != null) inputText.text = currentInput;
-
             HighlightNextKey();
-
-            if (currentInput.Length == currentTarget.Length)
-            {
-                currentTrialIndex++;
-                StartTrial();
-            }
+            if (currentInput.Length == currentTarget.Length) { currentTrialIndex++; StartTrial(); }
             return true; 
         }
-        else
-        {
-            HandleError(); 
-            currentTrialIndex++;
-            StartTrial();
-            return false; 
-        }
+        else { HandleError(); currentTrialIndex++; StartTrial(); return false; }
     }
 
-    private void HandleError()
-    {
-        totalErrorCount++;
-        StartCoroutine(FlashErrorScreen());
-    }
-
+    private void HandleError() { totalErrorCount++; StartCoroutine(FlashErrorScreen()); }
     private IEnumerator FlashErrorScreen()
     {
-        if (errorOverlay != null)
-        {
-            errorOverlay.gameObject.SetActive(true);
-            yield return new WaitForSeconds(screenFlashDuration);
-            errorOverlay.gameObject.SetActive(false);
-        }
+        if (errorOverlay != null) { errorOverlay.gameObject.SetActive(true); yield return new WaitForSeconds(screenFlashDuration); errorOverlay.gameObject.SetActive(false); }
     }
 }
